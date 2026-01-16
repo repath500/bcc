@@ -1,0 +1,17 @@
+name = "inspect-api"
+main = "src/index.ts"
+compatibility_date = "2024-05-01"
+
+[durable_objects]
+bindings = [{ name = "SESSION_DO", class_name = "SessionDO" }]
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["SessionDO"]
+
+[vars]
+ENVIRONMENT = "development"
+
+[[services]]
+binding = "SANDBOX_SERVICE"
+service = "sandbox-manager"

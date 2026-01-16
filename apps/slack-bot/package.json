@@ -1,0 +1,14 @@
+{
+  "name": "@inspect/slack-bot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node src/index.ts",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@slack/bolt": "^4.0.0"
+  }
+}

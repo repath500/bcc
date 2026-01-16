@@ -1,0 +1,19 @@
+{
+  "name": "inspect-clone",
+  "private": true,
+  "packageManager": "pnpm@9.12.0",
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "format": "prettier --write .",
+    "typecheck": "turbo run typecheck"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.30",
+    "eslint": "^8.57.0",
+    "prettier": "^3.2.5",
+    "turbo": "^2.1.2",
+    "typescript": "^5.4.5"
+  }
+}

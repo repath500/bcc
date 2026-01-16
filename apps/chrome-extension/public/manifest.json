@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "Inspect Clone",
+  "version": "0.1.0",
+  "permissions": ["storage", "scripting"],
+  "action": {
+    "default_title": "Inspect Clone"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"]
+    }
+  ]
+}
