@@ -9,12 +9,7 @@ export class E2BProvider {
   async createSandbox(options: SandboxOptions): Promise<SandboxInstance> {
     const sandbox = await Sandbox.create({
       apiKey: this.env.E2B_API_KEY,
-      timeout: 60 * 60 * 1000,
-      envs: {
-        ZAI_API_KEY: this.env.ZAI_API_KEY,
-        OPENCODE_SERVER_PASSWORD: this.env.OPENCODE_SERVER_PASSWORD,
-        GITHUB_TOKEN: options.githubToken
-      }
+      timeout: 60 * 60 * 1000
     });
 
     await this.installOpenCode(sandbox);
@@ -24,8 +19,8 @@ export class E2BProvider {
     await this.startOpenCodeServer(sandbox);
     await this.startVSCodeServer(sandbox);
 
-    const sandboxUrl = normalizeUrl(sandbox.getHost(4096));
-    const vscodeUrl = normalizeUrl(sandbox.getHost(8080));
+    const sandboxUrl = normalizeUrl(sandbox.getHostname(4096));
+    const vscodeUrl = normalizeUrl(sandbox.getHostname(8080));
     const opencodeSessionId = await this.createOpenCodeSession(sandboxUrl);
 
     return {
@@ -38,15 +33,11 @@ export class E2BProvider {
   }
 
   async closeSandbox(instance: SandboxInstance): Promise<void> {
-    await instance.sandbox.kill();
+    await instance.sandbox.close();
   }
 
   private async installOpenCode(sandbox: Sandbox): Promise<void> {
-    await sandbox.commands.exec({
-      cmd: 'bash',
-      args: ['-c', 'curl -fsSL https://opencode.ai/install | bash'],
-      detached: false
-    });
+    await sandbox.process.startAndWait('bash -c "curl -fsSL https://opencode.ai/install | bash"');
   }
 
   private async cloneRepository(sandbox: Sandbox, options: SandboxOptions): Promise<void> {
@@ -55,21 +46,30 @@ export class E2BProvider {
       `https://x-access-token:${options.githubToken}@github.com/`
     );
 
-    await sandbox.commands.exec({
-      cmd: 'git',
-      args: ['clone', '--branch', options.branch, authenticatedUrl, '/workspace'],
-      detached: false
-    });
+    await sandbox.process.startAndWait(`git clone --branch ${options.branch} ${authenticatedUrl} /workspace`);
 
-    await sandbox.commands.exec({
-      cmd: 'git',
-      args: ['config', '--global', 'user.email', 'bot@inspect.local'],
+    await sandbox.process.startAndWait({
+      cmd: 'git config --global user.email "bot@inspect.local"',
       cwd: '/workspace'
     });
 
-    await sandbox.commands.exec({
-      cmd: 'git',
-      args: ['config', '--global', 'user.name', 'Inspect Bot'],
+    await sandbox.process.startAndWait({
+      cmd: 'git config --global user.name "Inspect Bot"',
+      cwd: '/workspace'
+    });
+
+    await sandbox.process.startAndWait({
+      cmd: 'git config --global credential.helper store',
+      cwd: '/workspace'
+    });
+
+    await sandbox.filesystem.write(
+      '/root/.git-credentials',
+      `https://x-access-token:${options.githubToken}@github.com\n`
+    );
+
+    await sandbox.process.startAndWait({
+      cmd: `git remote set-url origin ${authenticatedUrl}`,
       cwd: '/workspace'
     });
   }
@@ -96,46 +96,35 @@ export class E2BProvider {
       }
     };
 
-    await sandbox.files.write(
+    await sandbox.filesystem.write(
       '/root/.config/opencode/opencode.json',
       JSON.stringify(config, null, 2)
     );
   }
 
   private async startOpenCodeServer(sandbox: Sandbox): Promise<void> {
-    await sandbox.commands.exec({
-      cmd: 'opencode',
-      args: ['serve', '--port', '4096'],
+    await sandbox.process.start({
+      cmd: 'opencode serve --port 4096',
       cwd: '/workspace',
-      envs: {
+      envVars: {
         OPENCODE_SERVER_PASSWORD: this.env.OPENCODE_SERVER_PASSWORD
-      },
-      detached: true
+      }
     });
 
     await this.waitForServer(sandbox, 4096);
   }
 
   private async startVSCodeServer(sandbox: Sandbox): Promise<void> {
-    await sandbox.commands.exec({
-      cmd: 'bash',
-      args: ['-c', 'curl -fsSL https://code-server.dev/install.sh | sh'],
-      detached: false
-    });
+    await sandbox.process.startAndWait('bash -c "curl -fsSL https://code-server.dev/install.sh | sh"');
 
-    await sandbox.commands.exec({
-      cmd: 'code-server',
-      args: ['--bind-addr', '0.0.0.0:8080', '--auth', 'none', '/workspace'],
-      detached: true
+    await sandbox.process.start({
+      cmd: 'code-server --bind-addr 0.0.0.0:8080 --auth none /workspace'
     });
   }
 
   private async waitForServer(sandbox: Sandbox, port: number): Promise<void> {
     for (let attempt = 0; attempt < 30; attempt += 1) {
-      const result = await sandbox.commands.exec({
-        cmd: 'bash',
-        args: ['-c', `curl -s http://localhost:${port}/health || true`]
-      });
+      const result = await sandbox.process.startAndWait(`curl -s http://localhost:${port}/health || true`);
 
       if (result.stdout.trim().length > 0) {
         return;

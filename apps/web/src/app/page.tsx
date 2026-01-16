@@ -9,9 +9,23 @@ import {
   openSessionSocket,
   sendMessage
 } from '@/lib/api';
-import type { ChatMessage, QueueItem, SessionEvent } from '@/lib/types';
+import type { ChatMessage, QueueItem, SessionEvent, SessionCreateRequest } from '@/lib/types';
 import { ChatInput } from '@/components/ChatInput';
 import { ChatMessage as ChatBubble } from '@/components/ChatMessage';
+import { Sidebar } from '@/components/Sidebar';
+import { CreateSessionDialog } from '@/components/CreateSessionDialog';
+import { WorkspacePanel } from '@/components/WorkspacePanel';
+import { RightSidebar } from '@/components/RightSidebar';
+import { AnalyticsDashboard } from '@/components/AnalyticsDashboard';
+
+interface Session {
+  id: string;
+  title: string;
+  repo: string;
+  ticket: string;
+  status: 'active' | 'inactive';
+  updatedAt: string;
+}
 
 const randomName = () => {
   const adjectives = ['Brisk', 'Bright', 'Sharp', 'Curious', 'Bold', 'Swift'];
@@ -21,7 +35,7 @@ const randomName = () => {
   }`;
 };
 
-const demoSessions = [
+const demoSessions: Session[] = [
   {
     id: 'session-alpha',
     title: 'Trip editing UX flow with screenshots',
@@ -104,28 +118,11 @@ const demoMessages: ChatMessage[] = [
   }
 ];
 
-const demoQueue: QueueItem[] = [
-  {
-    id: 'queue-1',
-    userId: 'user-1',
-    username: 'Riya',
-    content: 'Audit recent UX flows and collect snapshots.',
-    queuedAt: Date.now() - 1000 * 60 * 2,
-    position: 1
-  }
-];
-
 const metricCards = [
   { label: 'Merges past week', value: '1,307', trend: '+12%' },
   { label: 'Authors past week', value: '202', trend: '+8%' },
   { label: 'Humans past week', value: '275', trend: '+4%' },
   { label: 'Merge rate', value: '94%', trend: '+2%' }
-];
-
-const automationEvents = [
-  { id: 'auto-1', label: 'Chrome devtools click', time: '2m ago' },
-  { id: 'auto-2', label: 'Chrome devtools take snapshot', time: '4m ago' },
-  { id: 'auto-3', label: 'Chrome devtools wait for idle', time: '6m ago' }
 ];
 
 const taskChecklist = [
@@ -142,20 +139,21 @@ export default function Home() {
   const socketRef = useRef<WebSocket | null>(null);
   const [userId, setUserId] = useState('');
   const [username, setUsername] = useState('');
-  const [repoUrl, setRepoUrl] = useState('');
-  const [branch, setBranch] = useState('main');
-  const [installationId, setInstallationId] = useState('');
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [queue, setQueue] = useState<QueueItem[]>([]);
+  const [, setQueue] = useState<QueueItem[]>([]);
   const [status, setStatus] = useState('Idle');
   const [sandboxUrl, setSandboxUrl] = useState<string | null>(null);
   const [vscodeUrl, setVscodeUrl] = useState<string | null>(null);
   const [isExecuting, setIsExecuting] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [sessionQuery, setSessionQuery] = useState('');
+  const [, setError] = useState<string | null>(null);
+  const [sessionQuery] = useState('');
   const [selectedSession, setSelectedSession] = useState<string>('session-alpha');
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [viewMode, setViewMode] = useState<'chat' | 'split' | 'ide'>('chat');
+  const [sessions, setSessions] = useState(demoSessions);
+  const [showAnalytics, setShowAnalytics] = useState(false);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -222,19 +220,13 @@ export default function Home() {
     }
   };
 
-  const handleCreateSession = async () => {
+  const handleCreateSession = async (payload: SessionCreateRequest) => {
     if (!ready) return;
     setIsCreating(true);
     setError(null);
     setStatus('Starting');
 
     try {
-      const payload = {
-        repoUrl,
-        branch,
-        installationId: installationId ? Number(installationId) : undefined
-      };
-
       const response = await createSession(payload, userId, username);
       setSessionId(response.sessionId);
       setSandboxUrl(response.sandboxUrl ?? null);
@@ -252,6 +244,18 @@ export default function Home() {
 
       const statusResponse = await fetchSessionStatus(response.sessionId, userId, username);
       setIsExecuting(statusResponse.isExecuting);
+
+      const newSession = {
+        id: response.sessionId,
+        title: `Session ${response.sessionId.slice(0, 8)}`,
+        repo: payload.repoUrl.split('/').slice(-2).join('/'),
+        ticket: 'new',
+        status: 'active' as const,
+        updatedAt: 'now'
+      };
+      setSessions((prev) => [newSession, ...prev]);
+      setSelectedSession(response.sessionId);
+      setIsDialogOpen(false);
     } catch (err) {
       setError((err as Error).message);
       setStatus('Error');
@@ -280,99 +284,75 @@ export default function Home() {
     };
   }, [sessionId, ready, userId, username]);
 
-  const filteredSessions = demoSessions.filter((session) =>
+  const filteredSessions = sessions.filter((session) =>
     session.title.toLowerCase().includes(sessionQuery.toLowerCase())
   );
   const chatMessages = messages.length > 0 ? messages : demoMessages;
-  const queueItems = queue.length > 0 ? queue : demoQueue;
+
+  const handleSelectSession = (sessionId: string) => {
+    setSelectedSession(sessionId);
+  };
+
+  const handleNewSession = () => {
+    setIsDialogOpen(true);
+  };
+
+  const currentSession = sessions.find((s) => s.id === selectedSession);
+  const sessionTitle = currentSession?.title || 'Trip editing UX flow with screenshots';
 
   return (
-    <main className="page">
-      <aside className="panel session-panel">
-        <div className="session-header">
-          <div>
-            <p className="eyebrow">Inspect</p>
-            <h1>Sessions</h1>
-          </div>
-          <div className="operator-chip">
-            <span className="avatar" />
-            <div>
-              <p className="label">Operator</p>
-              <p className="value">{username || '...'}</p>
-            </div>
-          </div>
-        </div>
-        <label className="field search-field">
-          <span>Search sessions</span>
-          <input
-            value={sessionQuery}
-            onChange={(event) => setSessionQuery(event.target.value)}
-            placeholder="Search sessions..."
-          />
-        </label>
-        <div className="session-group">
-          <p className="label">Active</p>
-          <div className="session-list">
-            {filteredSessions
-              .filter((session) => session.status === 'active')
-              .map((session) => (
-                <button
-                  key={session.id}
-                  type="button"
-                  className={`session-card ${selectedSession === session.id ? 'selected' : ''}`}
-                  onClick={() => setSelectedSession(session.id)}
-                >
-                  <div>
-                    <p className="session-title">{session.title}</p>
-                    <p className="session-meta">{session.repo}</p>
-                  </div>
-                  <div className="session-meta-right">
-                    <span className="session-ticket">{session.ticket}</span>
-                    <span className="session-time">{session.updatedAt}</span>
-                  </div>
-                </button>
-              ))}
-          </div>
-        </div>
-        <div className="session-group">
-          <p className="label">Inactive</p>
-          <div className="session-list">
-            {filteredSessions
-              .filter((session) => session.status === 'inactive')
-              .map((session) => (
-                <button
-                  key={session.id}
-                  type="button"
-                  className={`session-card ${selectedSession === session.id ? 'selected' : ''}`}
-                  onClick={() => setSelectedSession(session.id)}
-                >
-                  <div>
-                    <p className="session-title">{session.title}</p>
-                    <p className="session-meta">{session.repo}</p>
-                  </div>
-                  <div className="session-meta-right">
-                    <span className="session-ticket">{session.ticket}</span>
-                    <span className="session-time">{session.updatedAt}</span>
-                  </div>
-                </button>
-              ))}
-          </div>
-        </div>
-      </aside>
+    <main className="app-layout">
+      <Sidebar
+        sessions={filteredSessions}
+        selectedSession={selectedSession}
+        onSelectSession={handleSelectSession}
+        onNewSession={handleNewSession}
+        username={username}
+      />
 
-      <section className="panel main-panel">
-        <header className="main-header">
+      <CreateSessionDialog
+        isOpen={isDialogOpen}
+        onClose={() => setIsDialogOpen(false)}
+        onSubmit={handleCreateSession}
+        isCreating={isCreating}
+      />
+
+      <div className="main-content">
+        <header className="app-header">
           <div>
             <p className="eyebrow">Live Session</p>
-            <h2>Trip editing UX flow with screenshots</h2>
-            <p className="hero-subtitle">
-              Inspect agents working across web, Slack, and Chrome with full execution visibility.
-            </p>
+            <h2>{sessionTitle}</h2>
           </div>
-          <div className="status-pill-row">
-            <div>
-              <p className="label">Session</p>
-              <p className="value">{sessionId ?? 'Not started'}</p>
+          <div className="header-actions">
+            <button
+              type="button"
+              className="icon-button"
+              onClick={() => setShowAnalytics(!showAnalytics)}
+            >
+              📊 Analytics
+            </button>
+            <div className="view-toggle">
+              <button
+                type="button"
+                className={`toggle-button ${viewMode === 'chat' ? 'active' : ''}`}
+                onClick={() => setViewMode('chat')}
+              >
+                Chat
+              </button>
+              <button
+                type="button"
+                className={`toggle-button ${viewMode === 'split' ? 'active' : ''}`}
+                onClick={() => setViewMode('split')}
+              >
+                Split View
+              </button>
+              <button
+                type="button"
+                className={`toggle-button ${viewMode === 'ide' ? 'active' : ''}`}
+                onClick={() => setViewMode('ide')}
+              >
+                IDE
+              </button>
             </div>
             <div className={`status-pill ${isExecuting ? 'live' : ''}`}>
               {isExecuting ? 'Executing' : status}
@@ -380,205 +360,47 @@ export default function Home() {
           </div>
         </header>
 
-        <div className="metric-grid">
-          {metricCards.map((metric) => (
-            <article key={metric.label} className="metric-card">
-              <p className="label">{metric.label}</p>
-              <p className="metric-value">{metric.value}</p>
-              <div className="metric-trend">
-                <span>{metric.trend}</span>
-                <div className="metric-chart" />
+        {showAnalytics && <AnalyticsDashboard metrics={metricCards} />}
+
+        <div className={`content-area ${viewMode === 'split' ? 'split-mode' : viewMode === 'ide' ? 'ide-mode' : ''}`}>
+          {viewMode === 'split' && (
+            <WorkspacePanel sandboxUrl={sandboxUrl} vscodeUrl={vscodeUrl} />
+          )}
+
+          <section className="chat-panel">
+            <header className="panel-header">
+              <div>
+                <p className="label">Conversation</p>
+                <h3>Agent stream</h3>
               </div>
-            </article>
-          ))}
-          <article className="metric-card highlight">
-            <p className="label">Humans prompting</p>
-            <p className="metric-value">18</p>
-            <p className="metric-note">Live counter</p>
-          </article>
-        </div>
-
-        <section className="chat-panel">
-          <header className="panel-header">
-            <div>
-              <p className="label">Conversation</p>
-              <h3>Agent stream</h3>
-            </div>
-            <div className="chat-actions">
-              <button type="button" className="ghost-button">
-                Capture screenshot
-              </button>
-              <button type="button" className="ghost-button">
-                Post to Slack
-              </button>
-            </div>
-          </header>
-          <div className="chat-stream">
-            {chatMessages.map((message) => (
-              <ChatBubble key={message.id} message={message} />
-            ))}
-          </div>
-          <div className="chat-controls">
-            <ChatInput disabled={!sessionId} onSend={handleSend} />
-            <div className="input-tools">
-              <button type="button" className="icon-button">
-                🎙️ Voice
-              </button>
-              <button type="button" className="icon-button">
-                📎 Attach
-              </button>
-              <button type="button" className="icon-button">
-                ⚡ Build agent
-              </button>
-            </div>
-          </div>
-        </section>
-
-        <section className="automation-panel">
-          <header className="panel-header">
-            <div>
-              <p className="label">Browser automation</p>
-              <h3>Devtools actions</h3>
-            </div>
-            <span className="status-pill live">Live</span>
-          </header>
-          <div className="automation-list">
-            {automationEvents.map((event) => (
-              <div key={event.id} className="automation-item">
-                <span className="automation-dot" />
-                <div>
-                  <p className="automation-label">{event.label}</p>
-                  <p className="automation-time">{event.time}</p>
-                </div>
+              <div className="chat-actions">
+                <button type="button" className="ghost-button">
+                  📸 Capture screenshot
+                </button>
+                <button type="button" className="ghost-button">
+                  📤 Post to Slack
+                </button>
               </div>
-            ))}
-          </div>
-        </section>
-      </section>
-
-      <aside className="panel sidebar-panel">
-        <div className="sidebar-block">
-          <p className="label">Model + mode</p>
-          <div className="select-row">
-            <button type="button" className="pill">Claude Opus 4.5</button>
-            <button type="button" className="pill secondary">Build Agent</button>
-          </div>
-        </div>
-
-        <div className="sidebar-block">
-          <p className="label">Participants</p>
-          <div className="participant-list">
-            {['Riya', 'Tom', 'Inspect Bot'].map((name) => (
-              <div key={name} className="participant">
-                <span className="avatar" />
-                <span>{name}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="sidebar-block">
-          <p className="label">Branch / PR</p>
-          <div className="meta-card">
-            <p>branch: {branch}</p>
-            <p>PR: ramp/inspect-web#77214</p>
-            <p>repo: ramp/inspect-web</p>
-          </div>
-        </div>
-
-        <div className="sidebar-block">
-          <p className="label">Task checklist</p>
-          <div className="checklist">
-            {taskChecklist.map((task) => (
-              <label key={task.id} className="check-row">
-                <input type="checkbox" checked={task.done} readOnly />
-                <span>{task.label}</span>
-              </label>
-            ))}
-          </div>
-        </div>
-
-        <div className="sidebar-block">
-          <p className="label">Project tags</p>
-          <div className="tag-row">
-            {projectTags.map((tag) => (
-              <span key={tag} className="tag">
-                {tag}
-              </span>
-            ))}
-          </div>
-        </div>
-
-        <div className="sidebar-block">
-          <p className="label">Touched files</p>
-          <div className="file-list">
-            {filePaths.map((path) => (
-              <span key={path} className="file-chip">
-                {path}
-              </span>
-            ))}
-          </div>
-        </div>
-
-        <div className="sidebar-block">
-          <p className="label">Queue</p>
-          <div className="queue-list compact">
-            {queueItems.map((item) => (
-              <article key={item.id} className="queue-item">
-                <span className="queue-position">#{item.position}</span>
-                <div>
-                  <p className="queue-content">{item.content}</p>
-                  <p className="queue-meta">{item.username}</p>
-                </div>
-              </article>
-            ))}
-          </div>
-        </div>
-
-        <div className="sidebar-block">
-          <p className="label">Sandbox controls</p>
-          <div className="form-grid">
-            <label className="field">
-              <span>Repository URL</span>
-              <input
-                value={repoUrl}
-                onChange={(event) => setRepoUrl(event.target.value)}
-                placeholder="https://github.com/owner/repo"
-              />
-            </label>
-            <label className="field">
-              <span>Branch</span>
-              <input value={branch} onChange={(event) => setBranch(event.target.value)} />
-            </label>
-            <label className="field">
-              <span>GitHub Installation ID</span>
-              <input
-                value={installationId}
-                onChange={(event) => setInstallationId(event.target.value)}
-                placeholder="12345678"
-              />
-            </label>
-          </div>
-          <div className="actions">
-            <button type="button" onClick={handleCreateSession} disabled={!repoUrl || isCreating}>
-              {isCreating ? 'Starting...' : 'Start Session'}
-            </button>
-            <div className="links">
-              {sandboxUrl && (
-                <a href={sandboxUrl} target="_blank" rel="noreferrer">
-                  Open OpenCode
-                </a>
-              )}
-              {vscodeUrl && (
-                <a href={vscodeUrl} target="_blank" rel="noreferrer">
-                  Open VS Code
-                </a>
-              )}
+            </header>
+            <div className="chat-stream">
+              {chatMessages.map((message) => (
+                <ChatBubble key={message.id} message={message} />
+              ))}
             </div>
-          </div>
-          {error && <p className="error">{error}</p>}
+            <div className="chat-controls">
+              <ChatInput disabled={!sessionId} onSend={handleSend} />
+            </div>
+          </section>
+
+          {viewMode === 'ide' && (
+            <RightSidebar
+              tasks={taskChecklist}
+              projectTags={projectTags}
+              filePaths={filePaths}
+            />
+          )}
         </div>
-      </aside>
+      </div>
     </main>
   );
 }

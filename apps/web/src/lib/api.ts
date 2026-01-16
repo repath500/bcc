@@ -4,7 +4,9 @@ import type {
   SessionMessageResponse,
   SessionStatusResponse,
   SessionEvent,
-  QueueItem
+  QueueItem,
+  UserInfo,
+  RepoSummary
 } from './types';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? 'http://localhost:8787';
@@ -15,6 +17,53 @@ const withAuthHeaders = (userId: string, username: string) => ({
   'x-user-id': userId,
   'x-username': username
 });
+
+export const fetchUserInfo = async (userId: string, username: string): Promise<UserInfo> => {
+  const response = await fetch(`${API_BASE}/auth/user`, {
+    headers: withAuthHeaders(userId, username)
+  });
+
+  if (!response.ok) {
+    return {
+      userId,
+      username,
+      github: { connected: false }
+    };
+  }
+
+  return (await response.json()) as UserInfo;
+};
+
+export const getGitHubAuthUrl = (userId: string, username: string, redirect = '/'): string => {
+  const params = new URLSearchParams({ userId, username, redirect });
+  return `${API_BASE}/auth/github?${params}`;
+};
+
+export const fetchRepos = async (
+  userId: string,
+  username: string
+): Promise<{ repos: RepoSummary[]; installationId?: number }> => {
+  const response = await fetch(`${API_BASE}/api/repos`, {
+    headers: withAuthHeaders(userId, username)
+  });
+
+  if (!response.ok) {
+    return { repos: [] };
+  }
+
+  return (await response.json()) as { repos: RepoSummary[]; installationId?: number };
+};
+
+export const disconnectGitHub = async (
+  installationId: number,
+  userId: string,
+  username: string
+): Promise<void> => {
+  await fetch(`${API_BASE}/auth/github/installations/${installationId}`, {
+    method: 'DELETE',
+    headers: withAuthHeaders(userId, username)
+  });
+};
 
 export const createSession = async (
   payload: SessionCreateRequest,

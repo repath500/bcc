@@ -70,6 +70,19 @@ export interface RepoSummary {
   };
 }
 
+export interface GitHubConnection {
+  connected: boolean;
+  username?: string;
+  avatarUrl?: string;
+  installationId?: number;
+}
+
+export interface UserInfo {
+  userId: string;
+  username: string;
+  github: GitHubConnection;
+}
+
 export type SessionEvent =
   | { type: 'initial_state'; session: unknown; isExecuting: boolean }
   | { type: 'message'; message: ChatMessage }

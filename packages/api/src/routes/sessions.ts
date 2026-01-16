@@ -12,7 +12,21 @@ interface SandboxCreateResponse {
 export const sessionRoutes = new Hono<HonoEnv>()
   .post('/', async (c) => {
     const userId = c.get('userId');
-    const { repoUrl, branch = 'main', installationId } = await c.req.json();
+    const db = c.get('db');
+    const { repoUrl, branch = 'main', installationId: providedInstallationId } = await c.req.json();
+
+    let installationId = providedInstallationId;
+
+    if (!installationId) {
+      const primaryAccount = await db.getPrimaryGitHubAccount(userId);
+      if (!primaryAccount) {
+        return c.json(
+          { error: 'GitHub not connected. Please connect your GitHub account first.' },
+          401
+        );
+      }
+      installationId = primaryAccount.github_installation_id;
+    }
 
     const sessionId = generateSessionId();
 
@@ -23,7 +37,11 @@ export const sessionRoutes = new Hono<HonoEnv>()
     });
 
     if (!sandboxResponse.ok) {
-      return c.json({ error: 'Failed to create sandbox' }, 500);
+      const errorData = await sandboxResponse.json().catch(() => ({}));
+      return c.json(
+        { error: 'Failed to create sandbox', details: errorData },
+        500
+      );
     }
 
     const sandbox = (await sandboxResponse.json()) as SandboxCreateResponse;

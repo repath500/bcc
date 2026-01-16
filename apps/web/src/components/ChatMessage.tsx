@@ -1,4 +1,7 @@
 import type { ChatMessage as ChatMessageType } from '@/lib/types';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import { CodeBlock } from './CodeBlock';
 
 interface ChatMessageProps {
   message: ChatMessageType;
@@ -36,7 +39,29 @@ export function ChatMessage({ message }: ChatMessageProps) {
         </span>
       </div>
       {message.systemAction && <div className="message-action">{message.systemAction}</div>}
-      {message.content && <p className="message-content">{message.content}</p>}
+      {message.content && (
+        <div className="message-content">
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            components={{
+              code(props) {
+                const { children, className, ...rest } = props;
+                const match = /language-(\w+)/.exec(className || '');
+                const isInline = !className;
+                return !isInline && match ? (
+                  <CodeBlock className={className}>{String(children)}</CodeBlock>
+                ) : (
+                  <code className={className} {...rest}>
+                    {children}
+                  </code>
+                );
+              }
+            }}
+          >
+            {message.content}
+          </ReactMarkdown>
+        </div>
+      )}
       {message.attachments && message.attachments.length > 0 && (
         <div className="message-attachments">
           {message.attachments.map((attachment) => (
@@ -45,8 +70,11 @@ export function ChatMessage({ message }: ChatMessageProps) {
                 <img src={attachment.previewUrl ?? attachment.url} alt={attachment.name} />
               ) : (
                 <div className="attachment-file">
-                  <span className="attachment-name">{attachment.name}</span>
-                  <span className="attachment-meta">File attachment</span>
+                  <div className="file-icon">📄</div>
+                  <div>
+                    <span className="attachment-name">{attachment.name}</span>
+                    <span className="attachment-meta">Code file</span>
+                  </div>
                 </div>
               )}
             </div>

@@ -1,4 +1,4 @@
-import type { Message, QueuedMessage, Session } from '@inspect/shared';
+import type { Message, Session } from '@inspect/shared';
 import { generateMessageId } from '@inspect/shared';
 import type { Env } from '../types';
 

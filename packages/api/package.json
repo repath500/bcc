@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "wrangler dev",
     "build": "wrangler deploy --dry-run",
-    "lint": "eslint .",
+    "lint": "eslint . --ignore-pattern '.wrangler'",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

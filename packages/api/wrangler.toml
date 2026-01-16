@@ -9,6 +9,11 @@ bindings = [{ name = "SESSION_DO", class_name = "SessionDO" }]
 tag = "v1"
 new_sqlite_classes = ["SessionDO"]
 
+[[d1_databases]]
+binding = "DB"
+database_name = "inspect-db"
+database_id = "619200f6-cbde-414d-bc6f-44967e6efe73"
+
 [vars]
 ENVIRONMENT = "development"
 
