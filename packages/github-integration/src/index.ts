@@ -1,5 +1,4 @@
 import { App } from '@octokit/app';
-import { Octokit } from '@octokit/rest';
 
 export interface GitHubAuthConfig {
   appId: string;
@@ -25,13 +24,13 @@ export class GitHubIntegration {
     return data.token;
   }
 
-  async getInstallationOctokit(installationId: number): Promise<Octokit> {
+  async getInstallationOctokit(installationId: number): Promise<ReturnType<typeof this.app.getInstallationOctokit>> {
     return this.app.getInstallationOctokit(installationId);
   }
 
   async listRepositories(installationId: number) {
     const octokit = await this.getInstallationOctokit(installationId);
-    const { data } = await octokit.apps.listReposAccessibleToInstallation();
+    const { data } = await octokit.request('GET /installation/repositories');
     return data.repositories;
   }
 

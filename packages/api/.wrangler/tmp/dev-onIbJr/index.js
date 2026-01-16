@@ -51,7 +51,7 @@ var __privateSet = (obj, member, value, setter) => {
   return value;
 };
 
-// .wrangler/tmp/bundle-ch2jZ8/checked-fetch.js
+// .wrangler/tmp/bundle-HECnl0/checked-fetch.js
 function checkURL(request2, init) {
   const url = request2 instanceof URL ? request2 : new URL(
     (typeof request2 === "string" ? new Request(request2, init) : request2).url
@@ -69,7 +69,7 @@ function checkURL(request2, init) {
 }
 var urls;
 var init_checked_fetch = __esm({
-  ".wrangler/tmp/bundle-ch2jZ8/checked-fetch.js"() {
+  ".wrangler/tmp/bundle-HECnl0/checked-fetch.js"() {
     "use strict";
     urls = /* @__PURE__ */ new Set();
     __name(checkURL, "checkURL");
@@ -83,14 +83,14 @@ var init_checked_fetch = __esm({
   }
 });
 
-// .wrangler/tmp/bundle-ch2jZ8/strip-cf-connecting-ip-header.js
+// .wrangler/tmp/bundle-HECnl0/strip-cf-connecting-ip-header.js
 function stripCfConnectingIPHeader(input, init) {
   const request2 = new Request(input, init);
   request2.headers.delete("CF-Connecting-IP");
   return request2;
 }
 var init_strip_cf_connecting_ip_header = __esm({
-  ".wrangler/tmp/bundle-ch2jZ8/strip-cf-connecting-ip-header.js"() {
+  ".wrangler/tmp/bundle-HECnl0/strip-cf-connecting-ip-header.js"() {
     "use strict";
     __name(stripCfConnectingIPHeader, "stripCfConnectingIPHeader");
     globalThis.fetch = new Proxy(globalThis.fetch, {
@@ -116,6 +116,68 @@ var init_wrangler_modules_watch = __esm({
 var init_modules_watch_stub = __esm({
   "../../node_modules/.pnpm/wrangler@3.114.17_@cloudflare+workers-types@4.20260116.0_bufferutil@4.1.0_utf-8-validate@6.0.6/node_modules/wrangler/templates/modules-watch-stub.js"() {
     init_wrangler_modules_watch();
+  }
+});
+
+// src/db/schema.ts
+var schema_exports = {};
+__export(schema_exports, {
+  SCHEMA_SQL: () => SCHEMA_SQL
+});
+var SCHEMA_SQL;
+var init_schema = __esm({
+  "src/db/schema.ts"() {
+    "use strict";
+    init_checked_fetch();
+    init_strip_cf_connecting_ip_header();
+    init_modules_watch_stub();
+    SCHEMA_SQL = `
+-- Users table
+CREATE TABLE IF NOT EXISTS users (
+  id TEXT PRIMARY KEY,
+  username TEXT NOT NULL,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+-- Map users to GitHub App installations
+CREATE TABLE IF NOT EXISTS user_github_accounts (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  github_installation_id INTEGER NOT NULL,
+  github_user_id INTEGER NOT NULL,
+  github_username TEXT NOT NULL,
+  github_avatar_url TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY (user_id) REFERENCES users(id),
+  UNIQUE(user_id, github_installation_id)
+);
+
+-- Store GitHub installation tokens (short-lived, cached)
+CREATE TABLE IF NOT EXISTS user_github_tokens (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  github_installation_id INTEGER NOT NULL,
+  access_token TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  created_at TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+-- OAuth state for CSRF protection
+CREATE TABLE IF NOT EXISTS oauth_states (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  state TEXT NOT NULL UNIQUE,
+  redirect_url TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  expires_at TEXT NOT NULL
+);
+
+-- Indexes for performance
+CREATE INDEX IF NOT EXISTS idx_user_github_accounts_user_id ON user_github_accounts(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_github_tokens_user_id ON user_github_tokens(user_id);
+CREATE INDEX IF NOT EXISTS idx_oauth_states_state ON oauth_states(state);
+`;
   }
 });
 
@@ -5231,12 +5293,12 @@ var require_aggregate_error = __commonJS({
   }
 });
 
-// .wrangler/tmp/bundle-ch2jZ8/middleware-loader.entry.ts
+// .wrangler/tmp/bundle-HECnl0/middleware-loader.entry.ts
 init_checked_fetch();
 init_strip_cf_connecting_ip_header();
 init_modules_watch_stub();
 
-// .wrangler/tmp/bundle-ch2jZ8/middleware-insertion-facade.js
+// .wrangler/tmp/bundle-HECnl0/middleware-insertion-facade.js
 init_checked_fetch();
 init_strip_cf_connecting_ip_header();
 init_modules_watch_stub();
@@ -7392,27 +7454,144 @@ init_strip_cf_connecting_ip_header();
 init_modules_watch_stub();
 var createMiddleware = /* @__PURE__ */ __name((middleware) => middleware, "createMiddleware");
 
+// src/db/client.ts
+init_checked_fetch();
+init_strip_cf_connecting_ip_header();
+init_modules_watch_stub();
+var DatabaseClient = class {
+  constructor(db) {
+    this.db = db;
+  }
+  async initialize() {
+    const { SCHEMA_SQL: SCHEMA_SQL2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
+    const statements = SCHEMA_SQL2.split(";").filter((s) => s.trim());
+    for (const statement of statements) {
+      await this.db.exec(statement);
+    }
+  }
+  async getOrCreateUser(userId, username) {
+    const existing = await this.db.prepare("SELECT * FROM users WHERE id = ?").bind(userId).first();
+    if (existing) {
+      return existing;
+    }
+    await this.db.prepare("INSERT INTO users (id, username) VALUES (?, ?)").bind(userId, username).run();
+    return { id: userId, username, created_at: (/* @__PURE__ */ new Date()).toISOString() };
+  }
+  async getUserGitHubAccounts(userId) {
+    const result = await this.db.prepare("SELECT * FROM user_github_accounts WHERE user_id = ?").bind(userId).all();
+    return result.results;
+  }
+  async getPrimaryGitHubAccount(userId) {
+    const result = await this.db.prepare(
+      "SELECT * FROM user_github_accounts WHERE user_id = ? ORDER BY created_at ASC LIMIT 1"
+    ).bind(userId).first();
+    return result ?? null;
+  }
+  async linkGitHubAccount(userId, installationId, githubUserId, githubUsername, githubAvatarUrl) {
+    const id = crypto.randomUUID();
+    await this.db.prepare(
+      `INSERT INTO user_github_accounts 
+         (id, user_id, github_installation_id, github_user_id, github_username, github_avatar_url)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(user_id, github_installation_id) 
+         DO UPDATE SET github_username = excluded.github_username,
+                       github_avatar_url = excluded.github_avatar_url`
+    ).bind(id, userId, installationId, githubUserId, githubUsername, githubAvatarUrl).run();
+    return {
+      id,
+      user_id: userId,
+      github_installation_id: installationId,
+      github_user_id: githubUserId,
+      github_username: githubUsername,
+      github_avatar_url: githubAvatarUrl,
+      created_at: (/* @__PURE__ */ new Date()).toISOString()
+    };
+  }
+  async unlinkGitHubAccount(userId, installationId) {
+    await this.db.prepare("DELETE FROM user_github_accounts WHERE user_id = ? AND github_installation_id = ?").bind(userId, installationId).run();
+    await this.db.prepare("DELETE FROM user_github_tokens WHERE user_id = ? AND github_installation_id = ?").bind(userId, installationId).run();
+  }
+  async getCachedToken(userId, installationId) {
+    const result = await this.db.prepare(
+      `SELECT * FROM user_github_tokens 
+         WHERE user_id = ? AND github_installation_id = ? 
+         AND expires_at > datetime('now')
+         ORDER BY created_at DESC LIMIT 1`
+    ).bind(userId, installationId).first();
+    return result ?? null;
+  }
+  async cacheToken(userId, installationId, accessToken, expiresAt) {
+    const id = crypto.randomUUID();
+    await this.db.prepare("DELETE FROM user_github_tokens WHERE user_id = ? AND github_installation_id = ?").bind(userId, installationId).run();
+    await this.db.prepare(
+      `INSERT INTO user_github_tokens 
+         (id, user_id, github_installation_id, access_token, expires_at)
+         VALUES (?, ?, ?, ?, ?)`
+    ).bind(id, userId, installationId, accessToken, expiresAt.toISOString()).run();
+  }
+  async createOAuthState(userId, state, redirectUrl) {
+    const id = crypto.randomUUID();
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1e3);
+    await this.db.prepare(
+      `INSERT INTO oauth_states (id, user_id, state, redirect_url, expires_at)
+         VALUES (?, ?, ?, ?, ?)`
+    ).bind(id, userId, state, redirectUrl, expiresAt.toISOString()).run();
+    return {
+      id,
+      user_id: userId,
+      state,
+      redirect_url: redirectUrl,
+      created_at: (/* @__PURE__ */ new Date()).toISOString(),
+      expires_at: expiresAt.toISOString()
+    };
+  }
+  async validateAndConsumeOAuthState(state) {
+    const result = await this.db.prepare(
+      `SELECT * FROM oauth_states 
+         WHERE state = ? AND expires_at > datetime('now')`
+    ).bind(state).first();
+    if (result) {
+      await this.db.prepare("DELETE FROM oauth_states WHERE state = ?").bind(state).run();
+    }
+    return result ?? null;
+  }
+  async cleanupExpiredStates() {
+    await this.db.exec("DELETE FROM oauth_states WHERE expires_at < datetime('now')");
+  }
+  async cleanupExpiredTokens() {
+    await this.db.exec("DELETE FROM user_github_tokens WHERE expires_at < datetime('now')");
+  }
+};
+__name(DatabaseClient, "DatabaseClient");
+
 // src/middleware/auth.ts
+var dbClientCache = null;
+var dbInitialized = false;
+var dbMiddleware = createMiddleware(async (c, next) => {
+  if (!dbClientCache) {
+    dbClientCache = new DatabaseClient(c.env.DB);
+  }
+  if (!dbInitialized) {
+    await dbClientCache.initialize();
+    dbInitialized = true;
+  }
+  c.set("db", dbClientCache);
+  await next();
+});
 var authMiddleware = createMiddleware(async (c, next) => {
   const query = c.req.query();
   const userId = c.req.header("x-user-id") ?? query.userId ?? "anonymous";
   const username = c.req.header("x-username") ?? query.username ?? "Anonymous";
   c.set("userId", userId);
   c.set("username", username);
+  const db = c.get("db");
+  if (db && userId !== "anonymous") {
+    await db.getOrCreateUser(userId, username);
+  }
   await next();
 });
 
 // src/routes/auth.ts
-init_checked_fetch();
-init_strip_cf_connecting_ip_header();
-init_modules_watch_stub();
-var authRoutes = new Hono2().get("/github", (c) => {
-  return c.json({ status: "not-implemented" }, 501);
-}).get("/callback", (c) => {
-  return c.json({ status: "not-implemented" }, 501);
-});
-
-// src/routes/repos.ts
 init_checked_fetch();
 init_strip_cf_connecting_ip_header();
 init_modules_watch_stub();
@@ -8390,7 +8569,7 @@ var GitHubIntegration = class {
   }
   async listRepositories(installationId) {
     const octokit = await this.getInstallationOctokit(installationId);
-    const { data } = await octokit.apps.listReposAccessibleToInstallation();
+    const { data } = await octokit.request("GET /installation/repositories");
     return data.repositories;
   }
   async getAuthenticatedCloneUrl(owner, repo, installationId) {
@@ -8407,18 +8586,192 @@ var GitHubIntegration = class {
 };
 __name(GitHubIntegration, "GitHubIntegration");
 
-// src/routes/repos.ts
-var repoRoutes = new Hono2().get("/", async (c) => {
-  const installationId = c.req.query("installationId");
-  if (!installationId) {
-    return c.json({ error: "Missing installationId" }, 400);
+// src/routes/auth.ts
+var authRoutes = new Hono2().get("/github", async (c) => {
+  const userId = c.req.header("x-user-id") ?? c.req.query("userId");
+  const username = c.req.header("x-username") ?? c.req.query("username");
+  const redirectUrl = c.req.query("redirect") ?? "/";
+  if (!userId || !username) {
+    return c.json({ error: "Missing userId or username" }, 400);
+  }
+  const db = c.get("db");
+  const state = crypto.randomUUID();
+  await db.createOAuthState(userId, state, redirectUrl);
+  const authUrl = new URL("https://github.com/login/oauth/authorize");
+  authUrl.searchParams.set("client_id", c.env.GITHUB_CLIENT_ID);
+  authUrl.searchParams.set("redirect_uri", `${c.env.APP_BASE_URL}/auth/github/callback`);
+  authUrl.searchParams.set("scope", "read:user");
+  authUrl.searchParams.set("state", state);
+  return c.redirect(authUrl.toString());
+}).get("/github/callback", async (c) => {
+  const code = c.req.query("code");
+  const state = c.req.query("state");
+  const installationId = c.req.query("installation_id");
+  if (!code || !state) {
+    return c.redirect(`${c.env.APP_BASE_URL}?error=missing_params`);
+  }
+  const db = c.get("db");
+  const oauthState = await db.validateAndConsumeOAuthState(state);
+  if (!oauthState) {
+    return c.redirect(`${c.env.APP_BASE_URL}?error=invalid_state`);
+  }
+  const tokenResponse = await fetch("https://github.com/login/oauth/access_token", {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      client_id: c.env.GITHUB_CLIENT_ID,
+      client_secret: c.env.GITHUB_CLIENT_SECRET,
+      code,
+      redirect_uri: `${c.env.APP_BASE_URL}/auth/github/callback`
+    })
+  });
+  const tokenData = await tokenResponse.json();
+  if (tokenData.error) {
+    return c.redirect(
+      `${c.env.APP_BASE_URL}?error=oauth_error&message=${encodeURIComponent(tokenData.error_description ?? tokenData.error)}`
+    );
+  }
+  const userResponse = await fetch("https://api.github.com/user", {
+    headers: {
+      Authorization: `Bearer ${tokenData.access_token}`,
+      Accept: "application/vnd.github.v3+json",
+      "User-Agent": "Inspect-App"
+    }
+  });
+  if (!userResponse.ok) {
+    return c.redirect(`${c.env.APP_BASE_URL}?error=github_user_error`);
+  }
+  const githubUser = await userResponse.json();
+  let targetInstallationId = installationId ? Number(installationId) : null;
+  if (!targetInstallationId) {
+    const installationsResponse = await fetch("https://api.github.com/user/installations", {
+      headers: {
+        Authorization: `Bearer ${tokenData.access_token}`,
+        Accept: "application/vnd.github.v3+json",
+        "User-Agent": "Inspect-App"
+      }
+    });
+    if (installationsResponse.ok) {
+      const installationsData = await installationsResponse.json();
+      if (installationsData.installations.length > 0) {
+        targetInstallationId = installationsData.installations[0].id;
+      }
+    }
+  }
+  if (!targetInstallationId) {
+    const appInstallUrl = `https://github.com/apps/inspect-dev/installations/new?state=${state}`;
+    return c.redirect(appInstallUrl);
+  }
+  await db.linkGitHubAccount(
+    oauthState.user_id,
+    targetInstallationId,
+    githubUser.id,
+    githubUser.login,
+    githubUser.avatar_url
+  );
+  const redirectUrl = oauthState.redirect_url ?? "/";
+  return c.redirect(`${c.env.APP_BASE_URL}${redirectUrl}?github_connected=true`);
+}).get("/github/installations", async (c) => {
+  const userId = c.get("userId");
+  const db = c.get("db");
+  const accounts = await db.getUserGitHubAccounts(userId);
+  return c.json({ installations: accounts });
+}).delete("/github/installations/:installationId", async (c) => {
+  const userId = c.get("userId");
+  const installationId = Number(c.req.param("installationId"));
+  const db = c.get("db");
+  await db.unlinkGitHubAccount(userId, installationId);
+  return c.json({ success: true });
+}).get("/user", async (c) => {
+  const userId = c.get("userId");
+  const username = c.get("username");
+  const db = c.get("db");
+  const githubAccounts = await db.getUserGitHubAccounts(userId);
+  const primaryAccount = githubAccounts.length > 0 ? githubAccounts[0] : null;
+  return c.json({
+    userId,
+    username,
+    github: primaryAccount ? {
+      connected: true,
+      username: primaryAccount.github_username,
+      avatarUrl: primaryAccount.github_avatar_url,
+      installationId: primaryAccount.github_installation_id
+    } : { connected: false }
+  });
+}).get("/github/token", async (c) => {
+  const userId = c.get("userId");
+  const installationIdParam = c.req.query("installationId");
+  const db = c.get("db");
+  let installationId;
+  if (installationIdParam) {
+    installationId = Number(installationIdParam);
+  } else {
+    const primaryAccount = await db.getPrimaryGitHubAccount(userId);
+    if (!primaryAccount) {
+      return c.json({ error: "No GitHub account connected" }, 401);
+    }
+    installationId = primaryAccount.github_installation_id;
+  }
+  const cachedToken = await db.getCachedToken(userId, installationId);
+  if (cachedToken) {
+    return c.json({ token: cachedToken.access_token, installationId });
   }
   const github = new GitHubIntegration({
     appId: c.env.GITHUB_APP_ID,
     privateKey: c.env.GITHUB_PRIVATE_KEY
   });
-  const repos = await github.listRepositories(Number(installationId));
-  return c.json({ repos });
+  try {
+    const token = await github.getInstallationToken(installationId);
+    const expiresAt = new Date(Date.now() + 55 * 60 * 1e3);
+    await db.cacheToken(userId, installationId, token, expiresAt);
+    return c.json({ token, installationId });
+  } catch (error) {
+    return c.json(
+      { error: "Failed to get installation token", details: String(error) },
+      500
+    );
+  }
+}).post("/logout", async (c) => {
+  return c.json({ success: true, message: "Logged out" });
+});
+
+// src/routes/repos.ts
+init_checked_fetch();
+init_strip_cf_connecting_ip_header();
+init_modules_watch_stub();
+var repoRoutes = new Hono2().get("/", async (c) => {
+  const userId = c.get("userId");
+  const db = c.get("db");
+  const installationIdParam = c.req.query("installationId");
+  let installationId;
+  if (installationIdParam) {
+    installationId = Number(installationIdParam);
+  } else {
+    const primaryAccount = await db.getPrimaryGitHubAccount(userId);
+    if (!primaryAccount) {
+      return c.json(
+        { error: "GitHub not connected. Please connect your GitHub account first.", repos: [] },
+        401
+      );
+    }
+    installationId = primaryAccount.github_installation_id;
+  }
+  const github = new GitHubIntegration({
+    appId: c.env.GITHUB_APP_ID,
+    privateKey: c.env.GITHUB_PRIVATE_KEY
+  });
+  try {
+    const repos = await github.listRepositories(installationId);
+    return c.json({ repos, installationId });
+  } catch (error) {
+    return c.json(
+      { error: "Failed to fetch repositories", details: String(error), repos: [] },
+      500
+    );
+  }
 });
 
 // src/routes/sessions.ts
@@ -8471,7 +8824,19 @@ var generateMessageId = /* @__PURE__ */ __name(() => `msg_${crypto.randomUUID().
 // src/routes/sessions.ts
 var sessionRoutes = new Hono2().post("/", async (c) => {
   const userId = c.get("userId");
-  const { repoUrl, branch = "main", installationId } = await c.req.json();
+  const db = c.get("db");
+  const { repoUrl, branch = "main", installationId: providedInstallationId } = await c.req.json();
+  let installationId = providedInstallationId;
+  if (!installationId) {
+    const primaryAccount = await db.getPrimaryGitHubAccount(userId);
+    if (!primaryAccount) {
+      return c.json(
+        { error: "GitHub not connected. Please connect your GitHub account first." },
+        401
+      );
+    }
+    installationId = primaryAccount.github_installation_id;
+  }
   const sessionId = generateSessionId();
   const sandboxResponse = await c.env.SANDBOX_SERVICE.fetch("https://sandbox/create", {
     method: "POST",
@@ -8479,7 +8844,11 @@ var sessionRoutes = new Hono2().post("/", async (c) => {
     body: JSON.stringify({ sessionId, repoUrl, branch, installationId, userId })
   });
   if (!sandboxResponse.ok) {
-    return c.json({ error: "Failed to create sandbox" }, 500);
+    const errorData = await sandboxResponse.json().catch(() => ({}));
+    return c.json(
+      { error: "Failed to create sandbox", details: errorData },
+      500
+    );
   }
   const sandbox = await sandboxResponse.json();
   const stubId = c.env.SESSION_DO.idFromName(sessionId);
@@ -8895,6 +9264,7 @@ __name(SessionDO, "SessionDO");
 // src/index.ts
 var app = new Hono2();
 app.get("/health", (c) => c.json({ status: "ok", timestamp: Date.now() }));
+app.use("*", dbMiddleware);
 app.route("/auth", authRoutes);
 app.route("/webhooks", webhookRoutes);
 app.use("/api/*", authMiddleware);
@@ -8965,7 +9335,7 @@ var jsonError = /* @__PURE__ */ __name(async (request2, env, _ctx, middlewareCtx
 }, "jsonError");
 var middleware_miniflare3_json_error_default = jsonError;
 
-// .wrangler/tmp/bundle-ch2jZ8/middleware-insertion-facade.js
+// .wrangler/tmp/bundle-HECnl0/middleware-insertion-facade.js
 var __INTERNAL_WRANGLER_MIDDLEWARE__ = [
   middleware_ensure_req_body_drained_default,
   middleware_miniflare3_json_error_default
@@ -9000,7 +9370,7 @@ function __facade_invoke__(request2, env, ctx, dispatch, finalMiddleware) {
 }
 __name(__facade_invoke__, "__facade_invoke__");
 
-// .wrangler/tmp/bundle-ch2jZ8/middleware-loader.entry.ts
+// .wrangler/tmp/bundle-HECnl0/middleware-loader.entry.ts
 var __Facade_ScheduledController__ = class {
   constructor(scheduledTime, cron, noRetry) {
     this.scheduledTime = scheduledTime;

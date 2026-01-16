@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import type { HonoEnv } from './types';
-import { authMiddleware } from './middleware/auth';
+import { authMiddleware, dbMiddleware } from './middleware/auth';
 import { authRoutes } from './routes/auth';
 import { repoRoutes } from './routes/repos';
 import { sessionRoutes } from './routes/sessions';
@@ -12,6 +12,8 @@ export { SessionDO } from './durable-objects/SessionDO';
 const app = new Hono<HonoEnv>();
 
 app.get('/health', (c) => c.json({ status: 'ok', timestamp: Date.now() }));
+
+app.use('*', dbMiddleware);
 
 app.route('/auth', authRoutes);
 app.route('/webhooks', webhookRoutes);

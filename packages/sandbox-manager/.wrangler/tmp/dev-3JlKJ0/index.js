@@ -51,7 +51,7 @@ var __privateSet = (obj, member, value, setter) => {
   return value;
 };
 
-// .wrangler/tmp/bundle-EBHB28/checked-fetch.js
+// .wrangler/tmp/bundle-MfOcNa/checked-fetch.js
 function checkURL(request2, init2) {
   const url = request2 instanceof URL ? request2 : new URL(
     (typeof request2 === "string" ? new Request(request2, init2) : request2).url
@@ -69,7 +69,7 @@ function checkURL(request2, init2) {
 }
 var urls;
 var init_checked_fetch = __esm({
-  ".wrangler/tmp/bundle-EBHB28/checked-fetch.js"() {
+  ".wrangler/tmp/bundle-MfOcNa/checked-fetch.js"() {
     "use strict";
     urls = /* @__PURE__ */ new Set();
     __name(checkURL, "checkURL");
@@ -83,14 +83,14 @@ var init_checked_fetch = __esm({
   }
 });
 
-// .wrangler/tmp/bundle-EBHB28/strip-cf-connecting-ip-header.js
+// .wrangler/tmp/bundle-MfOcNa/strip-cf-connecting-ip-header.js
 function stripCfConnectingIPHeader(input, init2) {
   const request2 = new Request(input, init2);
   request2.headers.delete("CF-Connecting-IP");
   return request2;
 }
 var init_strip_cf_connecting_ip_header = __esm({
-  ".wrangler/tmp/bundle-EBHB28/strip-cf-connecting-ip-header.js"() {
+  ".wrangler/tmp/bundle-MfOcNa/strip-cf-connecting-ip-header.js"() {
     "use strict";
     __name(stripCfConnectingIPHeader, "stripCfConnectingIPHeader");
     globalThis.fetch = new Proxy(globalThis.fetch, {
@@ -8537,14 +8537,14 @@ var require_path_browserify = __commonJS({
   }
 });
 
-// .wrangler/tmp/bundle-EBHB28/middleware-loader.entry.ts
+// .wrangler/tmp/bundle-MfOcNa/middleware-loader.entry.ts
 init_checked_fetch();
 init_strip_cf_connecting_ip_header();
 init_modules_watch_stub();
 init_process();
 init_buffer();
 
-// .wrangler/tmp/bundle-EBHB28/middleware-insertion-facade.js
+// .wrangler/tmp/bundle-MfOcNa/middleware-insertion-facade.js
 init_checked_fetch();
 init_strip_cf_connecting_ip_header();
 init_modules_watch_stub();
@@ -11724,7 +11724,7 @@ var GitHubIntegration = class {
   }
   async listRepositories(installationId) {
     const octokit = await this.getInstallationOctokit(installationId);
-    const { data } = await octokit.apps.listReposAccessibleToInstallation();
+    const { data } = await octokit.request("GET /installation/repositories");
     return data.repositories;
   }
   async getAuthenticatedCloneUrl(owner, repo, installationId) {
@@ -13884,20 +13884,15 @@ var E2BProvider = class {
   async createSandbox(options) {
     const sandbox = await Sandbox.create({
       apiKey: this.env.E2B_API_KEY,
-      timeout: 60 * 60 * 1e3,
-      envs: {
-        ZAI_API_KEY: this.env.ZAI_API_KEY,
-        OPENCODE_SERVER_PASSWORD: this.env.OPENCODE_SERVER_PASSWORD,
-        GITHUB_TOKEN: options.githubToken
-      }
+      timeout: 60 * 60 * 1e3
     });
     await this.installOpenCode(sandbox);
     await this.cloneRepository(sandbox, options);
     await this.configureOpenCode(sandbox);
     await this.startOpenCodeServer(sandbox);
     await this.startVSCodeServer(sandbox);
-    const sandboxUrl = normalizeUrl(sandbox.getHost(4096));
-    const vscodeUrl = normalizeUrl(sandbox.getHost(8080));
+    const sandboxUrl = normalizeUrl(sandbox.getHostname(4096));
+    const vscodeUrl = normalizeUrl(sandbox.getHostname(8080));
     const opencodeSessionId = await this.createOpenCodeSession(sandboxUrl);
     return {
       sandboxId: options.sessionId,
@@ -13908,33 +13903,36 @@ var E2BProvider = class {
     };
   }
   async closeSandbox(instance) {
-    await instance.sandbox.kill();
+    await instance.sandbox.close();
   }
   async installOpenCode(sandbox) {
-    await sandbox.commands.exec({
-      cmd: "bash",
-      args: ["-c", "curl -fsSL https://opencode.ai/install | bash"],
-      detached: false
-    });
+    await sandbox.process.startAndWait('bash -c "curl -fsSL https://opencode.ai/install | bash"');
   }
   async cloneRepository(sandbox, options) {
     const authenticatedUrl = options.repoUrl.replace(
       "https://github.com/",
       `https://x-access-token:${options.githubToken}@github.com/`
     );
-    await sandbox.commands.exec({
-      cmd: "git",
-      args: ["clone", "--branch", options.branch, authenticatedUrl, "/workspace"],
-      detached: false
-    });
-    await sandbox.commands.exec({
-      cmd: "git",
-      args: ["config", "--global", "user.email", "bot@inspect.local"],
+    await sandbox.process.startAndWait(`git clone --branch ${options.branch} ${authenticatedUrl} /workspace`);
+    await sandbox.process.startAndWait({
+      cmd: 'git config --global user.email "bot@inspect.local"',
       cwd: "/workspace"
     });
-    await sandbox.commands.exec({
-      cmd: "git",
-      args: ["config", "--global", "user.name", "Inspect Bot"],
+    await sandbox.process.startAndWait({
+      cmd: 'git config --global user.name "Inspect Bot"',
+      cwd: "/workspace"
+    });
+    await sandbox.process.startAndWait({
+      cmd: "git config --global credential.helper store",
+      cwd: "/workspace"
+    });
+    await sandbox.filesystem.write(
+      "/root/.git-credentials",
+      `https://x-access-token:${options.githubToken}@github.com
+`
+    );
+    await sandbox.process.startAndWait({
+      cmd: `git remote set-url origin ${authenticatedUrl}`,
       cwd: "/workspace"
     });
   }
@@ -13959,41 +13957,30 @@ var E2BProvider = class {
         }
       }
     };
-    await sandbox.files.write(
+    await sandbox.filesystem.write(
       "/root/.config/opencode/opencode.json",
       JSON.stringify(config2, null, 2)
     );
   }
   async startOpenCodeServer(sandbox) {
-    await sandbox.commands.exec({
-      cmd: "opencode",
-      args: ["serve", "--port", "4096"],
+    await sandbox.process.start({
+      cmd: "opencode serve --port 4096",
       cwd: "/workspace",
-      envs: {
+      envVars: {
         OPENCODE_SERVER_PASSWORD: this.env.OPENCODE_SERVER_PASSWORD
-      },
-      detached: true
+      }
     });
     await this.waitForServer(sandbox, 4096);
   }
   async startVSCodeServer(sandbox) {
-    await sandbox.commands.exec({
-      cmd: "bash",
-      args: ["-c", "curl -fsSL https://code-server.dev/install.sh | sh"],
-      detached: false
-    });
-    await sandbox.commands.exec({
-      cmd: "code-server",
-      args: ["--bind-addr", "0.0.0.0:8080", "--auth", "none", "/workspace"],
-      detached: true
+    await sandbox.process.startAndWait('bash -c "curl -fsSL https://code-server.dev/install.sh | sh"');
+    await sandbox.process.start({
+      cmd: "code-server --bind-addr 0.0.0.0:8080 --auth none /workspace"
     });
   }
   async waitForServer(sandbox, port) {
     for (let attempt = 0; attempt < 30; attempt += 1) {
-      const result = await sandbox.commands.exec({
-        cmd: "bash",
-        args: ["-c", `curl -s http://localhost:${port}/health || true`]
-      });
+      const result = await sandbox.process.startAndWait(`curl -s http://localhost:${port}/health || true`);
       if (result.stdout.trim().length > 0) {
         return;
       }
@@ -14125,7 +14112,7 @@ var jsonError = /* @__PURE__ */ __name(async (request2, env2, _ctx, middlewareCt
 }, "jsonError");
 var middleware_miniflare3_json_error_default = jsonError;
 
-// .wrangler/tmp/bundle-EBHB28/middleware-insertion-facade.js
+// .wrangler/tmp/bundle-MfOcNa/middleware-insertion-facade.js
 var __INTERNAL_WRANGLER_MIDDLEWARE__ = [
   middleware_ensure_req_body_drained_default,
   middleware_miniflare3_json_error_default
@@ -14162,7 +14149,7 @@ function __facade_invoke__(request2, env2, ctx, dispatch, finalMiddleware) {
 }
 __name(__facade_invoke__, "__facade_invoke__");
 
-// .wrangler/tmp/bundle-EBHB28/middleware-loader.entry.ts
+// .wrangler/tmp/bundle-MfOcNa/middleware-loader.entry.ts
 var __Facade_ScheduledController__ = class {
   constructor(scheduledTime, cron, noRetry) {
     this.scheduledTime = scheduledTime;
